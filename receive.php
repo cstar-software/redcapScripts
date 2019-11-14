@@ -5,15 +5,13 @@
 require("import.php");
  
 /*
-curl -F "action=test" http://localhost/~ryanjoseph/redcap/receive.php
-curl -F "action=test" -F "upload=@test.csv" http://localhost/~ryanjoseph/redcap/receive.php
-curl -F "action=test" -F "upload[]=@test.csv" -F "upload[]=@test2.csv" http://localhost/~ryanjoseph/redcap/receive.php
-curl -F "action=store" -F "upload=@test.csv" http://localhost/~ryanjoseph/redcap/receive.php
+  curl -F "action=store" -F "upload[]=@2019-08-30 11.30.11 Assessment Scores.csv" http://localhost/~ryanjoseph/redcap/receive.php
+*/
 
-curl -F "action=test" -F "upload=@test.csv" http://thealchemistguild.com/nih/receive.php
-curl -F "action=store" -F "upload=@test.csv" http://thealchemistguild.com/nih/receive.php
-curl --user "test" -F "action=test" http://thealchemistguild.com/nih/receive.php
-
+/*
+curl -F "action=store" -F "upload=@2019-08-19 10.42.39 Assessment Data.csv" http://localhost/~ryanjoseph/redcap/receive.php
+curl -F "action=store" -F "upload[]=@2019-08-19 10.42.39 Assessment Scores.csv" http://localhost/~ryanjoseph/redcap/receive.php
+curl -F "action=store" -F "upload=@2019-08-19 10.42.39 Assessment Data.csv" http://batcaveusc.com/nih/receive.php
 */
 
 function post_message(int $error_code, string $message): void {
@@ -30,54 +28,61 @@ function fatal_error(int $code, string $message): void {
   die;
 }
 
-function upload_temp_files(): array {
-  // TODO: we need to process $_FILES['upload']['error'] and check for errors
-  // UPLOAD_ERR_OK is what we need to look for
-  if (is_array($_FILES['upload']['tmp_name'])) {
-    return $_FILES['upload']['tmp_name'];
+function get_upload_value(string $key) {
+  if (is_array($_FILES['upload'][$key])) {
+    return $_FILES['upload'][$key][0];
   } else {
-    return array($_FILES['upload']['tmp_name']);
+    return $_FILES['upload'][$key];
   }
 }
 
-if (isset($_POST['action'])) {
-  $action = $_POST['action'];
-  if ($action != 'test' && $action != 'store') {
-    fatal_error(-1, "invalid action '$action'.");
+function backup_file($source, $dest) {
+  $dir = "backup";
+  if (!file_exists($dir)) mkdir($dir);
+  $dest = "$dir/$dest";
+  move_uploaded_file($source, $dest);
+}
+
+if ($_POST['action'] == "store") {
+
+  // there was an error with the upload protocol
+  if (get_upload_value('error') != UPLOAD_ERR_OK) {
+    fatal_error(2, "upload error");
+  }
+
+  // check if the uploaded file name matches any of the requested files
+  if (preg_match("/(\w+ \w+)\.csv$/", get_upload_value('name'), $matches)) {
+    if ($matches[1] == "Assessment Scores") {
+      if (parse_assessment_scores(get_upload_value('tmp_name'), true)) {
+        post_message(0, "uploaded successfully!");
+        backup_file(get_upload_value('tmp_name'), get_upload_value('name'));
+        exit;
+      } else {
+        fatal_error(4, "parse_assessment_scores failed");
+      }
+    } else if ($matches[1] == "Assessment Data") {
+      if (parse_assessment_data(get_upload_value('tmp_name'), true)) {
+        post_message(0, "uploaded successfully!");
+        backup_file(get_upload_value('tmp_name'), get_upload_value('name'));
+        exit;
+      } else {
+        fatal_error(5, "parse_assessment_data failed");
+      }
+    } else if ($matches[1] == "Registration Data") {
+      // nothing to do but we don't want to send an error code
+      post_message(0, "ok");
+      backup_file(get_upload_value('tmp_name'), get_upload_value('name'));
+      exit;
+    }
+  } else if (get_upload_value('name') == "TestConnection.csv") {
+    post_message(0, "ok");
+    exit;
   }
 } else {
-  fatal_error(-1, "no action specified.");
+  fatal_error(3, "only 'store' action is allowed");
 }
 
-$count = 0;
-$files = upload_temp_files();
-// print_r($files);
-foreach ($files as $file) {
-  if (file_exists($file)) {
-    if ($action == 'store') {
-      if (parse_and_upload($file, true)) $count += 1;
-    } else {
-      $count += 1;
-    }
-  }
-}
-
-if ($count == 0) {
-  post_message(1, 'no files attached to upload');
-} else {
-  // TODO: this isn't the format the NIH toolbox expects
-  // I rememeber seeing there was json response
-  // which contained the number of files uploaded but I don't
-  // remember where now
-  if ($action == 'store') {
-    if ($count > 1) {
-      post_message(0, "Info: $count files stored");
-    } else {
-      post_message(0, 'Info: file stored');
-    }
-  } else {
-    post_message(0, 'ok');
-  }
-}
+// if get here something went wrong
+fatal_error(100, "upload error");
 
 ?>
